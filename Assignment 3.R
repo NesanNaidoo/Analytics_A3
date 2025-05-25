@@ -9,13 +9,10 @@ library(parallel)
 library(cluster)
 library(factoextra)
 
-
-
-
 ###################################################
 ########### Exploratory Data Analysis #############
 
-#-------------Data Description___________________#
+#------------(a) Data Description_________________#
 
 data <- read.table("STA4026_Assignment_Clustering.txt", header = FALSE)
 
@@ -33,7 +30,7 @@ infinite_vals <- any(sapply(data, function(x) any(is.infinite(x)))) # false - no
 
 data_summary <- summary(data)
 
-#------------Exploratory Analysis----------------#
+#----------(c) Exploratory Analysis---------------#
 
 pairPlot <- ggplot(data, aes(x=V1, y=V2)) +
   geom_point(alpha = 0.5) +
@@ -42,10 +39,7 @@ pairPlot <- ggplot(data, aes(x=V1, y=V2)) +
 ggMarginal(pairPlot, type = "densigram")
 
 
-
-
-
-#-------Exploratory Analysis of Distance--------#
+#-----(d) Exploratory Analysis of Distance--------#
 
 dist <- dist(data, method = "euclidean")
 dist_vals <- as.vector(dist)
@@ -59,7 +53,7 @@ ggplot(data.frame(Distance = dist_vals), aes(x = Distance)) +
        y = "Frequency") +
   theme_minimal()
 
-#------------Outlier Identification------------#
+#----------(e) Outlier Identification-------------#
 
 data_clean <- data |>
   mutate(dist_from_median = sqrt((V1 - median(V1))^2 + (V2 - median(V2))^2)) |>  mutate(observation = row_number())
@@ -74,38 +68,14 @@ ggplot(data, aes(V1, V2)) +
   geom_point() +
   geom_point(data = outliers, color = "red", size = 2) 
 
-#------------Correlation Analysis---------------#
+#----------(f) Correlation Analysis---------------#
 cor_mat <- cor(data_cleaned$V1, data_cleaned$V2)
 
 
+###################################################
+############ Hyper-parameter Tuning ###############
 
-
-###Alternative EDA
-
-ggpairs(data_cleaned, title=NULL)+ #pair plot
-  theme_bw() + # Start with a black-and-white theme
-  theme(
-    plot.background = element_blank(), # Remove background
-    panel.background = element_blank(), # Remove panel background
-    panel.grid.major = element_blank(), # Remove major grid lines
-    panel.grid.minor = element_blank(), # Remove minor grid lines
-    panel.border = element_rect(colour = "black", fill = NA, size = 1),
-    strip.background = element_blank(), # Remove background from facet labels
-    plot.margin = unit(c(1, 1, 1, 1), "lines") # Adjust plot margin
-  )
-
-
-#pairwise distances
-distances = dist(data_cleaned, method = "euclidean", diag = FALSE, upper = FALSE)
-
-hist(distances, breaks = 30, freq = FALSE, col = "pink" , main = "", ylim = c(0, 2.5e-06))
-lines(density(distances), col = "blue", lwd = 2)
-
-
-# Hyperparamter Tuning
-##### (a) Selecting K#####
-
-
+#--------------(a) Selecting K--------------------#
 
 # Range of K values
 K <- 2:20
@@ -119,8 +89,8 @@ sil_widths_kmeans <- numeric(length(K))
 for (i in seq_along(K)) {
   k <- K[i]
   km <- kmeans(data_cleaned, centers = k, nstart =100)
-  ss <- silhouette(km$cluster, dists)
-  sil_widths_kmeans[i] <- mean(ss[, 3])
+  sil <- silhouette(km$cluster, dists)
+  sil_widths_kmeans[i] <- mean(sil[, 3])
 }
 
 # Find the best K (max silhouette)
@@ -132,16 +102,14 @@ plot(K, sil_widths_kmeans, type = 'b', pch = 19, col = 'blue',
      main = "")
 abline(v = best_k_kmeans, lty = 2, col = "darkblue")
 
-
-
 ### ---- K-MEDOIDS (CLARA) ---- ###
 sil_widths_medoid <- numeric(length(K))
 
 for (i in seq_along(K)) {
   k <- K[i]
   km <- clara(data_cleaned, k = k, metric = "euclidean", pamLike = TRUE, samples = 50)
-  ss <- silhouette(km$clustering, dists)
-  sil_widths_medoid[i] <- mean(ss[, 3])
+  sil <- silhouette(km$clustering, dists)
+  sil_widths_medoid[i] <- mean(sil[, 3])
 }
 
 # Best K for medoids
@@ -153,18 +121,11 @@ plot(K, sil_widths_medoid, type = 'b', pch = 19, col = 'red',
      main = "")
 abline(v = best_k_medoids, lty = 2, col = "darkred")
 
-
-
-
-
-#### (b) Initialisation Sensitivity #####
-
-
+#----------(b) Initialisation Sensitivity---------#
 
 set.seed(2025)  # reproducibility
 
-k_vals <- 2:20
-num_iter <- 50
+iter <- 50 # number of iterations
 
 # Define k-means optimal K function
 opt_kmeans <- function(data, k_range) {
@@ -192,10 +153,10 @@ cl <- makeCluster(detectCores() - 1)
 clusterExport(cl, c("opt_kmeans", "opt_kmed", "data_cleaned", "k_vals", "silhouette", "dist", "kmeans", "clara"))
 
 # Parallel runs for k-means
-opt_kmeans_pll <- parSapply(cl, 1:num_iter, function(i) opt_kmeans(data_cleaned, k_vals))
+opt_kmeans_pll <- parSapply(cl, 1:iter, function(i) opt_kmeans(data_cleaned, K))
 
 # Parallel runs for k-medoids
-opt_kmed_pll <- parSapply(cl, 1:num_iter, function(i) opt_kmed(data_cleaned, k_vals))
+opt_kmed_pll <- parSapply(cl, 1:iter, function(i) opt_kmed(data_cleaned, K))
 
 stopCluster(cl)  # Stop cluster
 
@@ -233,14 +194,11 @@ HPT_kmeds <- ggplot(data.frame(K = names(kmedoids_freq), Frequency = as.integer(
 ggsave("HPT_kmeans.png", HPT_kmeans)
 ggsave("HPT_kmeds.png", HPT_kmeds)
 
-
-
-#### (c) Increasing Initialisations ####
-
+#---------(c) Increasing Initialisations----------#
 
 cl <- makeCluster(detectCores() - 1)
 clusterExport(cl, c("opt_kmeans", "data_cleaned", "k_vals", "silhouette", "dist", "kmeans"))
-opt_kmeans_pll <- parSapply(cl, 1:200, function(i) opt_kmeans(data_cleaned, k_vals))
+opt_kmeans_pll <- parSapply(cl, 1:200, function(i) opt_kmeans(data_cleaned, K))
 stopCluster(cl)
 
 parallel_k_freq <- table(opt_kmeans_pll)
@@ -253,16 +211,11 @@ Kmean_200<-ggplot(data.frame(K = names(parallel_k_freq), Frequency = as.integer(
        y = "Frequency") +
   theme_minimal()
 
-
-
-
-
-
 # Create cluster with number of cores minus one
 cl <- makeCluster(detectCores() - 1)
 clusterExport(cl, c("opt_kmed", "data_cleaned", "k_vals", "clara"))
 opt_kmed_pll <- parSapply(cl, 1:200, function(i) {
-  opt_kmed(data_cleaned, k_vals)
+  opt_kmed(data_cleaned, K)
 })
 
 # Stop the cluster after finishing
@@ -281,70 +234,55 @@ Kmed_200<-ggplot(data.frame(K = names(opt_kmed_pll_freq), Frequency = as.integer
 ggsave("HPT_kmeans_300.png", Kmean_300)
 ggsave("HPT_kmeds_300.png", Kmed_300)
 
-
-
-#### Selecting K using Gap ####
+#----------(d) Selecting K using Gap--------------#
 # Computing the gap statistic
 set.seed(2025)
-gap_stat_km <- clusGap(data_cleaned, FUN = kmeans, K.max = 20, B = 50)
+km_gap_stat <- clusGap(data_cleaned, FUN = kmeans, K.max = 20, B = 50)
 
-gap_stat_kmed <- clusGap(data_cleaned, FUN = clara, K.max = 20, B = 50)
+kmed_gap_stat <- clusGap(data_cleaned, FUN = clara, K.max = 20, B = 50)
 # Find the index of max gap value
-best_k_kmeans <- which.max(gap_stat_km$Tab[,"gap"])
-best_k_medoids <- which.max(gap_stat_kmed$Tab[,"gap"])
+best_k_kmeans <- which.max(km_gap_stat$Tab[,"gap"])
+best_k_medoids <- which.max(kmed_gap_stat$Tab[,"gap"])
 
 
-km_gap<-plot(gap_stat_km, main="", xlab="K", col="steelblue", pch=16, ylim = c(0.29,0.6))
-kmed_gap<-plot(gap_stat_kmed, main="", xlab="K", col="#CC0000", pch=16, ylim = c(0.29,0.6))
+km_gap<-plot(km_gap_stat, main="", xlab="K", col="steelblue", pch=16, ylim = c(0.29,0.6))
+kmed_gap<-plot(kmed_gap_stat, main="", xlab="K", col="#CC0000", pch=16, ylim = c(0.29,0.6))
 
 
-plot(gap_stat_km, main="", xlab="K", col="steelblue", pch=16, ylim=c(0.29,0.6))
+plot(km_gap_stat, main="", xlab="K", col="steelblue", pch=16, ylim=c(0.29,0.6))
 abline(v = best_k_kmeans, lty=2, col="steelblue")
 
-plot(gap_stat_kmed, main="", xlab="K", col="#CC0000", pch=16, ylim=c(0.29,0.6))
+plot(kmed_gap_stat, main="", xlab="K", col="#CC0000", pch=16, ylim=c(0.29,0.6))
 abline(v = best_k_medoids, lty=2, col="#CC0000")
-
-
-
-
 
 ggsave("km_gap.jpeg", km_gap)
 ggsave("kmed_gap.jpeg", kmed_gap)
 
-best_k_kmeans <- gap_stat_km$Tab[which.max(gap_stat_km$Tab[,"gap"]), "k"]
-best_k_medoids <- gap_stat_kmed$Tab[which.max(gap_stat_kmed$Tab[,"gap"]), "k"]
+best_k_kmeans <- km_gap_stat$Tab[which.max(km_gap_stat$Tab[,"gap"]), "k"]
+best_k_medoids <- kmed_gap_stat$Tab[which.max(kmed_gap_stat$Tab[,"gap"]), "k"]
 
+###################################################
+################Cluster Analysis###################
+#---------(a) Silhouette Score Analysis-----------#
 
-
-
-
-
-
-#Recommendations for Q3
-# Use k =15,K=16  for k means
-# Use K= 20, k=14 for k-mediods
-
-##############################################################################
-#### QUESTION 3 ####
+#................ K MEANS 15......................#
 
 set.seed(2025)
-
-#### K MEANS 15
-my_colors <- c("#3300CC","#008080","#FF0000", "#FF9900","#0000FF", "#9900FF",
+colours15 <- c("#3300CC","#008080","#FF0000", "#FF9900","#0000FF", "#9900FF",
                "#FFFF33", "#339900", "#FF99FF", "#0099CC", "#99FF00",
                "#003399","#FFCC00", "#FF0066","#00CCCC")
 
-km <- kmeans(data_cleaned, centers = 15, nstart = 50) # k-means with 15 cluster
+km15 <- kmeans(data_cleaned, centers = 15, nstart = 100, iter.max = 50) # k-means with 15 cluster
 
-data_cleaned$Cluster <- as.factor(km$cluster)
+data_cleaned$Cluster <- as.factor(km15$cluster)
 
 # Compute silhouette widths
-sil <- silhouette(km$cluster, dist(data_cleaned))
-data_cleaned$SilWidth = sil[, 'sil_width']
+sil15 <- silhouette(km15$cluster, dist(data_cleaned))
+data_cleaned$SilWidth = sil15[, 'sil_width']
 
-plot(sil, col = my_colors, border = NA, main = "")
+plot(sil15, col = colours15, border = NA, main = "")
 
-data_cleaned$Cluster <- as.factor(km$cluster)
+data_cleaned$Cluster <- as.factor(km15$cluster)
 
 # Scatter plot of the clustered data
 cluster_plot <- ggplot(data_cleaned, aes(x = V1, y = V2, color = Cluster)) +
@@ -353,26 +291,26 @@ cluster_plot <- ggplot(data_cleaned, aes(x = V1, y = V2, color = Cluster)) +
   labs(title = "",
        x = "V1",
        y = "V2") +
-  scale_color_manual(values = my_colors) # Applying custom colors
+  scale_color_manual(values = colours15) # Applying custom colors
 
 # Print the plot
 print(cluster_plot)
 
-####### K MEANS 16#########
+#................ K MEANS 16.....................#
 
-set.seed(2026)
-my_colors16 <- c("#008080","#FF0000", "#FF9900","#0000FF", "#9900FF",
+set.seed(2025)
+colours16 <- c("#008080","#FF0000", "#FF9900","#0000FF", "#9900FF",
                  "#FFFF33", "#339900", "#FF99FF", "#0099CC", "#99FF00",
                  "#003399","#FFCC00", "#FF0066","#00CCCC","#3300CC","#999999")
 
-km16 <- kmeans(data_cleaned, centers = 16, nstart = 50) # k-means with 16 cluster
+km16 <- kmeans(data_cleaned, centers = 16, nstart = 100, iter.max = 50) # k-means with 16 cluster
 
 data_cleaned$Cluster16 <- as.factor(km16$cluster)
 
 # Compute silhouette widths
 sil16 <- silhouette(km16$cluster, dist(data_cleaned))
 
-plot(sil16, col = my_colors16, border = NA, main = "")
+plot(sil16, col = colours16, border = NA, main = "")
 
 data_cleaned$Cluster16 <- as.factor(km16$cluster)
 
@@ -383,15 +321,15 @@ cluster_plot <- ggplot(data_cleaned, aes(x = V1, y = V2, color = Cluster16)) +
   labs(title = "",
        x = "V1",
        y = "V2") +
-  scale_color_manual(values = my_colors16) # Applying custom colors
+  scale_color_manual(values = colours16) # Applying custom colors
 
 # Print the plot
 print(cluster_plot)
 
-###### K MEDOIDS 14 ######
+#................K MEDOIDS 14.....................#
 
 set.seed(2025)
-my_colors14 <- c("#3300CC","#008080","#FF0000", "#FF9900","#0000FF", "#9900FF",
+colours14 <- c("#3300CC","#008080","#FF0000", "#FF9900","#0000FF", "#9900FF",
                "#FFFF33", "#339900", "#FF99FF", "#0099CC", "#99FF00",
                "#003399","#FFCC00", "#FF0066")
 
@@ -399,7 +337,7 @@ cl14 <- clara(data_cleaned, 14, metric= "euclidean", samples = 50, pamLike=T)
 
 sil14c <- silhouette(cl14$clustering, dist(data_cleaned))
 
-plot(sil14c, col = my_colors14, border = NA, main = "")
+plot(sil14c, col = colours14, border = NA, main = "")
 
 data_cleaned$Cluster14c <- as.factor(cl14$clustering)
 
@@ -411,13 +349,15 @@ cluster_plot <- ggplot(data_cleaned, aes(x = V1, y = V2, color = Cluster14c)) +
        x = "V1",
        y = "V2",
        color="Cluster") +
-  scale_color_manual(values = my_colors14) # Applying custom colors
+  scale_color_manual(values = colours14) # Applying custom colors
 
 # Print the plot
 print(cluster_plot)
-###### K MEDOIDS 20#########
 
-my_colors20 <- c(
+#................K MEDOIDS 20.....................#
+
+set.seed(2025)
+colours20 <- c(
   "#008080", "#FF0000", "#FF9900", "#0000FF", "#9900FF",
   "#FFFF33", "#339900", "#FF99FF", "#0099CC", "#99FF00",
   "#003399", "#FFCC00", "#FF0066", "#00CCCC", "#CC0066", "#3300CC",
@@ -425,13 +365,11 @@ my_colors20 <- c(
 )
 
 
-set.seed(10)
-
 cl20 <- clara(data_cleaned, 20, metric= "euclidean", samples = 50, pamLike=T)
 
 sil20c <- silhouette(cl20$clustering, dist(data_cleaned))
 
-plot(sil20c, col = my_colors20, border = NA, main = "")
+plot(sil20c, col = colours20, border = NA, main = "")
 
 data_cleaned$Cluster20c <- as.factor(cl20$clustering)
 
@@ -443,75 +381,135 @@ cluster_plot <- ggplot(data_cleaned, aes(x = V1, y = V2, color = Cluster20c)) +
        x = "V1",
        y = "V2",
        color="Cluster") +
-  scale_color_manual(values = my_colors20) # Applying custom colors
+  scale_color_manual(values = colours20) # Applying custom colors
 
 # Print the plot
 print(cluster_plot)
 
-###### Outlier analysis##############
- 
-set.seed(10)
-kmm1 <- kmeans(data, 15, nstart = 50)
+#--------------(b) Outlier analysis---------------#
+# locate outliers on cluster and silhouette plots
+set.seed(2025)
 
-my_colors16 <- c("#008080","#FF0000", "#FF9900","#0000FF", "#9900FF",
-                 "#FFFF33", "#339900", "#FF99FF", "#0099CC", "#99FF00",
-                 "#003399","#FFCC00", "#FF0066","#00CCCC", "#CC0066")
+km_with_outliers <- kmeans(data, centers = 15, nstart = 100, iter.max = 50) # k-means with 15 cluster on data with outliers
 
 outlier_indices <- c(461, 340, 2540, 4722, 442, 486, 501, 2317, 535, 4723)
 
-df_ggplot <- cbind(data, clusters = as.factor(kmm1$cluster))
+data$Cluster <- as.factor(km_with_outliers$cluster)
 
-ggplot(df_ggplot, aes(x = V1, y=V2, col = clusters)) +
+# Compute silhouette widths
+sil_with_outliers <- silhouette(km_with_outliers$cluster, dist(data))
+data$SilWidth = sil_with_outliers[, 'sil_width']
+
+plot(sil_with_outliers, col = colours15, border = NA, main = "")
+
+# Scatter plot of the clustered data
+cluster_plot <- ggplot(data, aes(x = V1, y = V2, color = Cluster)) +
   geom_point(alpha = 0.7) +
+  geom_vline(xintercept = c(125000, 875000), 
+             color = "red", 
+             linetype = "dotted",
+             linewidth = 0.8) +
   theme_minimal() +
-  scale_color_manual(values = my_colors16) +
-  labs(x = "V1", y = "V2", color = "clusters") +
-  geom_point(df_ggplot[outlier_indices, ],
+  labs(title = "",
+       x = "V1",
+       y = "V2") +
+  scale_color_manual(values = colours15) +
+  geom_point(data[outlier_indices, ],
              mapping = aes(x = V1, y=V2, col = "black"),
-             col ="black", shape = 22, fill = "black", size = 2)
+             col ="black", fill = "black", size = 2)
 
-######Post Processing:########
+# Print the plot
+print(cluster_plot)
 
+##### compare original cluster with outliers to clustering without outliers
+common_cols <- intersect(colnames(data), colnames(data_cleaned))
+data_subset <- data[, common_cols]
+data_cleaned_subset <- data_cleaned[, common_cols]
 
-kmm1 <- kmeans(data_cleaned, 15, nstart = 50)
+# original cluster 
+set.seed(2025)
+km_with_outliers <- kmeans(data_subset, centers = 15, nstart = 100, iter.max = 50)
 
-my_colors15 <- c(
-  "#008080", "#FF0000", "#FF9900", "#0000FF", "#9900FF",
-  "#FFFF33", "#339900", "#FF99FF", "#0099CC", "#99FF00",
-  "#003399", "#FFCC00", "#FF0066", "#00CCCC", "#CC0066"
+# cluster without outliers
+km_wo_outliers <- kmeans(data_cleaned_subset, centers = 15, nstart = 100, iter.max = 50)
+
+# compare cluster centers
+all_centers <- rbind(
+  data.frame(km_with_outliers$centers, Type = "With Outliers"),
+  data.frame(km_wo_outliers$centers, Type = "Without Outliers")
 )
 
-#silhouette scores
-ll <- silhouette(kmm1$cluster, dist(data_cleaned))
+ggplot() +
+  geom_point(data = data, aes(x = V1, y = V2), color = "gray20", alpha = 0.3) +
+  geom_point(data = all_centers, aes(x = V1, y = V2, color = Type), size = 4) +
+  scale_color_manual(values = c("With Outliers" = "green", "Without Outliers" = "purple")) +
+  labs(x = "V1", y = "V2") + 
+  geom_point(data[outlier_indices, ],
+             mapping = aes(x = V1, y=V2, col = "black"),
+             col ="black", fill = "black", size = 2) +
+  theme_minimal()
 
-#  Find negative silhouette points
-negative_indices <- which(ll[, 3] < 0)
-negative_scores <- ll[negative_indices, ]
+#--------------(c) Post-Processing----------------#
 
-# reassigning those points to their second-best but nearest cluster
-ll[, 1][negative_indices] <- ll[, 2][negative_indices]
+km15 <- kmeans(data_cleaned, 15, nstart = 100, iter.max = 50)
 
-#creating a new data frame with updated clusters
-new_df <- cbind(data_cleaned, cluster = as.factor(ll[, 1]))
+# silhouette scores
+sil15 <- silhouette(km15$cluster, dist(data_cleaned))
+negative_indices <- which(sil15[, 3] < 0) # negative silhouette points
 
+# reassign neg score obs, to closest different cluster (based on centroid diff)
+centroids <- km15$centers
+updated_clusters <- km15$cluster
 
-ggplot(new_df, aes(x = V1, y = V2, col = cluster)) +
+for (i in negative_indices) {
+  curr_cluster <- km15$cluster[i]
+  dist <- sqrt(rowSums((t(t(centroids) - unlist(data_cleaned[i, ]))^2))) # calc dist to all centroids
+  alt_clusters <- order(dist) # get dist to other clusters (asc - closest to furthest)
+  alt_clusters <- alt_clusters[alt_clusters != curr_cluster] # ignore distance to its current cluster
+  
+  # only reassing if a better cluster exists
+  if (length(alt_clusters) > 0) {
+    updated_clusters[i] <- alt_clusters[1] # assign to closest diff cluster
+  }
+}
+
+# creating a new data frame with updated clusters
+new_df <- cbind(data_cleaned, cluster = as.factor(updated_clusters))
+
+# plot the clusters with the re-assigned obs in black
+ggplot(new_df, aes(x = V1, y = V2, color = cluster)) +
   geom_point(alpha = 0.7) +
+  geom_point(data = new_df[negative_indices, ], 
+             aes(x = V1, y = V2), 
+             color = "black", size = 3) +
   theme_minimal() +
-  scale_color_manual(values = my_colors15) +
+  scale_color_manual(values = colours15) +
   labs(x = "V1", y = "V2", color = "Clusters (Updated)")
 
-
-##Additonal
-# silhouette before and after
+# silhouette comparisons
 # Original silhouette 
-original_sil <- silhouette(kmm1$cluster, dist(data_cleaned))
-plot(original_sil, col = my_colors15, border = NA, main = "Original Silhouette")
+original_sil <- sil15
+plot(original_sil, col = colours15, border = NA, main = "Original Silhouette")
 
 # Updated silhouette after reassignment:
-updated_sil <- silhouette(as.numeric(new_df$cluster), dist(data_cleaned))
-plot(updated_sil, col = my_colors15, border = NA, main = "")
+updated_sil <- silhouette(updated_clusters, dist(data_cleaned))
+plot(updated_sil, col = colours15, border = NA, main = "")
 
-#  Compare average silhouette widths
+# Compare average silhouette widths
 cat("Average silhouette width before:", mean(original_sil[, 3]), "\n")
 cat("Average silhouette width after: ", mean(updated_sil[, 3]), "\n")
+
+# summary table of negative-score points
+results_table <- data.frame(
+  Index = negative_indices,
+  Original_Silhouette_Score = round(sil15[negative_indices, 3], 4),
+  Original_Cluster = sil15[negative_indices, 1],
+  Reassigned_Cluster = sil15[negative_indices, 2],
+  New_Silhouette_Score = round(updated_sil[negative_indices, 3], 4)
+)
+
+
+
+
+
+
