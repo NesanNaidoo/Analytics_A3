@@ -1,5 +1,4 @@
 # Analytics_A3
-[![Ask DeepWiki](https://devin.ai/assets/askdeepwiki.png)](https://deepwiki.com/NesanNaidoo/Analytics_A3)
 
 ## Overview
 
